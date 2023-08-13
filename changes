@@ -1,0 +1,18 @@
+1: more optomised for numpy
+2: actually works (fingers crossed)
+3: changing the data types from dict to array, if we have a network that has 2 input neurons, 2 middle neurons, and 2 output neurons, the network array would be like: 
+[   
+    [
+        0.3, #i0-m0
+        0.2, #i1-m0
+        0.6, #i0-m1
+        -0.9 #i1-m1
+    ],
+    [
+        -0.5,#m0-o0
+        0.3, #m1-o0
+        0.4, #m0-o1
+        0.7  #m1-o1
+    ]
+]
+if it was in a list. 
