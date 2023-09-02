@@ -69,6 +69,9 @@ class neural_network:
             arr.fill(0)
             weights.append(arr)
             biases.append(np.zeros(self.outputs))
+        maxsize = max(max([[s.size for s in weights],[s.size for s in biases]]))
+        #weights = [np.pad(s, (0,maxsize-s.size), 'constant', constant_values=0 ) for s in weights]
+        #biases = [np.pad(s, (0,maxsize-s.size), 'constant', constant_values=0) for s in biases]
         network=np.array([weights,biases])
         self.network=network
         self.initialise_matrices()
@@ -77,21 +80,23 @@ class neural_network:
         if activation=="RELU":return np.ma.clip(numbers,0,numbers.max())
         if activation=="tanh":return np.tanh(numbers)
         else:raise Exception("Activation TypeError: Please enter a valid activation function. If you're not a developer, dm dogzrgodz or That Guy#6482 on discord. ")
-    def get_output(self,inputs,activation):
-        try:matrices=self.weight_matrices
+    def get_output(self, inputs,activation):
+        try:weights=self.weight_matrices
         except:raise Exception("Weight Matrix Initialisation error: Please initialise the weight matrix with initialise_matrices(weights), or if you're not a developer, dm dogzrgodz or That Guy#6482 on discord. ")
-        layer=0
-        layers=self.middle.tolist()
-        layers.insert(0,self.inputs)
-        status=[inputs]
-        unactivated_status=[inputs]
-        while layer<(len(self.middle)+1):
-            curr_layer=np.array([0.0])
-            for neuron in range(layers[layer]):curr_layer=(matrices[layer][neuron]*status[layer][neuron]) + curr_layer
-            status.append(self.activate(curr_layer,activation))
-            unactivated_status.append(curr_layer)
-            layer+=1
-        return status[-1], [status,unactivated_status]
+        try:biases = self.network[1]
+        except:raise Exception("Biases Initialisation error: Network biases are not defined, to define biases load or randomise the neural network, or if you're not a developer, dm dogzrgodz or That Guy#6482 on discord. ")
+        last_vals = inputs
+        all_vals = [inputs]
+        unactivated_vals = [inputs]
+        for layer in range(len(weights)):
+            r3weights = np.rot90(weights[layer],1)
+            layer_output = np.rot90(last_vals * r3weights,3)
+            layer_sum = biases[layer] + np.sum(layer_output,axis=0)
+            last_vals = self.activate(layer_sum,activation)
+            all_vals.append(last_vals)
+            unactivated_vals.append(layer_sum)
+        output = last_vals
+        return output, [all_vals,unactivated_vals]
     def find_error(self,expected_outputs,states,activation):
         total_error=0
         for state in range(len(states)):
@@ -189,12 +194,12 @@ class DQL:
     def save_network(self,name="brain.npy"):
         np.save(name, self.nn.network)
     def load_network(self,name="brain.npy"):
-        self.nn.network=np.load(name)
+        self.nn.network=np.load(name,allow_pickle=True)
+        self.nn.initialise_matrices()
     def randomise_brain(self):
         self.nn.randomise_network()
-    def get_next_frame(self,state):
-        #add to replay buffer
-        output=self.nn.get_output(state,self.activation)
+    def get_next_frame(self, state):
+        output = self.nn.get_output(state, self.activation)
         first_index = int(np.where(output[0] == output[0].max())[0][0])
         return first_index, output
     def replay_buffer_adder(self,state,action,outputs,reward,terminal):
@@ -256,6 +261,5 @@ class RNN:
         if random:
             prevous_state_bias=np.array([np.random.uniform(0.9,1.1,self.middle[layer]) for layer in range(len(self.middle))])
 
-network=RNN(3,np.array([5,4,6]),2)
-network.randomise_network()
-
+#network=RNN(3,np.array([5,4,6]),2)
+#network.randomise_network()
