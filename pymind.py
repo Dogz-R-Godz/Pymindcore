@@ -1,6 +1,236 @@
 import numpy as np
 import time 
 import math as maths
+import math
+import time
+import numpy as np2
+from PIL import Image
+#from discord_webhook import DiscordWebhook
+
+class Optomised_neural_network:
+    def __init__(self, input_neurons, hidden_layers, output_neurons, activation="relu",random_init=True,tanh_output=False):
+        self.layers = [input_neurons] + hidden_layers + [output_neurons]
+        self.weights = []
+        self.biases = []
+        self.tanh_output=tanh_output
+        
+        if random_init:
+            for i in range(len(self.layers) - 1):
+                self.weights.append(np.random.randn(self.layers[i], self.layers[i + 1]))
+                self.biases.append(np.random.randn(self.layers[i + 1]))
+        else:
+            for i in range(len(self.layers) - 1):
+                self.weights.append(np.zeros((self.layers[i], self.layers[i + 1])))
+                self.biases.append(np.zeros(self.layers[i + 1]))
+        
+        # Set activation function
+        if activation == "relu":
+            self.activation = self.relu
+            self.activation_prime = self.relu_prime
+        elif activation == "sig":
+            self.activation = self.sigmoid
+            self.activation_prime = self.sigmoid_prime
+        elif activation == "tanh":
+            self.activation = self.tanh
+            self.activation_prime = self.tanh_prime
+
+    def relu(self, x):
+        return np.maximum(0.01*x, x)
+    
+    def relu_prime(self, x):
+        return np.where(x > 0, 1, 0.01)
+    
+    def sigmoid(self, x):
+        return 1 / (1 + np.exp(-x))
+    
+    def sigmoid_prime(self, x):
+        return x * (1 - x)
+
+    def tanh(self, x):
+        return np.tanh(x)
+    def tanh_prime(self, x):
+        return 1 - np.tanh(x)**2
+
+    def save_to_file(self, filename,isCupy=False):
+        # Convert each CuPy array in the lists to a NumPy array
+        if isCupy:
+            weights_numpy = [weight.get() for weight in self.weights]
+            biases_numpy = [bias.get() for bias in self.biases]
+        else:
+            weights_numpy = self.weights
+            biases_numpy = self.biases
+
+        # Now create the NumPy array to bundle the data
+        data = np2.array([weights_numpy, biases_numpy], dtype=object)
+
+        # Save the data using NumPy's save method
+        np2.save(filename, data)
+    
+    def load_from_file(self, filename):
+        # Load the data using NumPy's load method
+        data = np2.load(filename, allow_pickle=True)
+
+        # Convert the loaded NumPy arrays back to CuPy arrays and set to self.weights and self.biases
+        self.weights = [np.array(arr) for arr in data[0]]
+        self.biases = [np.array(arr) for arr in data[1]]
+    
+    def forward(self, x, tanh_output=False):
+        self.a = [x]
+        for i in range(len(self.weights) - 1):
+            #curr_weights=self.weights[i].copy()
+            #curr_weights=np.stack(curr_weights,self.a[-1].size)
+
+            z = self.a[-1] @ self.weights[i] + self.biases[i]
+            self.a.append(self.activation(z))
+        z_out = self.a[-1] @ self.weights[-1] + self.biases[-1]
+        if tanh_output:self.a.append(self.tanh(z_out))
+        else:self.a.append(self.sigmoid(z_out))
+        
+        return self.a[-1]
+    
+    def compute_loss(self, y):
+        m = y.shape[0]
+        eachStateError=(self.a[-1] - y) ** 2
+        return np.sum(eachStateError)/m #(1 / (2 * m)) * 
+
+    def find_error(self, x, y):
+        # Compute predictions for the given input states
+        predictions = self.forward(x,self.tanh_output)
+        # Compute the error for each sample and sum them up
+        differences=(predictions - y)
+        squared=np.sum(differences ** 2)
+        total_error = squared/len(x)
+        return total_error
+    
+    def backward(self, x, y, learning_rate=0.1, reduceDeriv=False):
+        startingTime=time.time()
+        m = x.shape[0]
+        self.dz = [-(y - self.a[-1]) / m]
+        for i in reversed(range(len(self.weights))):
+            dw = self.a[i].T @ self.dz[-1]
+            db = np.sum(self.dz[-1], axis=0)
+            self.weights[i] -= learning_rate * dw
+            self.biases[i] -= learning_rate * db
+            if i != 0:
+                if reduceDeriv:
+                    act=self.activation_prime(self.a[i])
+                    dz_next = ((self.dz[-1] @ self.weights[i].T)/(0.5*(10**i))) * act
+                    self.dz.append(dz_next)
+                else:
+                    dz_next = self.dz[-1] @ self.weights[i].T * self.activation_prime(self.a[i])
+                    self.dz.append(dz_next)
+                
+    def train(self, x, y, epochs=10000, learning_rate=0.01, optimizer=None, beta1=0.9, beta2=0.999, epsilon=1e-8, print_=False): #ping_webhook_URL=None,
+        if optimizer == "ADAM":
+            # Initialize Adam-specific variables
+            m_weights = [np.zeros_like(w) for w in self.weights]
+            v_weights = [np.zeros_like(w) for w in self.weights]
+            m_biases = [np.zeros_like(b) for b in self.biases]
+            v_biases = [np.zeros_like(b) for b in self.biases]
+            t = 0
+        totalTime=0
+        prevError=99999999
+        for epoch in range(epochs):
+            startingTime=time.time()
+            self.forward(x,self.tanh_output)
+            self.backward(x, y, learning_rate,True)
+            
+            if optimizer == "ADAM":
+                t += 1
+                for i in range(len(self.weights)):
+                    # Compute gradients for weights and biases
+                    grad_w = self.a[i].T @ self.dz[-(i+1)]
+                    grad_b = np.sum(self.dz[-(i+1)], axis=0)
+                    
+                    # Update first moment for weights and biases
+                    m_weights[i] = beta1 * m_weights[i] + (1 - beta1) * grad_w
+                    m_biases[i] = beta1 * m_biases[i] + (1 - beta1) * grad_b
+                    
+                    # Update second moment for weights and biases
+                    v_weights[i] = beta2 * v_weights[i] + (1 - beta2) * grad_w ** 2
+                    v_biases[i] = beta2 * v_biases[i] + (1 - beta2) * grad_b ** 2
+                    
+                    # Bias-corrected moments
+                    m_weights_corr = m_weights[i] / (1 - beta1**t)
+                    m_biases_corr = m_biases[i] / (1 - beta1**t)
+                    v_weights_corr = v_weights[i] / (1 - beta2**t)
+                    v_biases_corr = v_biases[i] / (1 - beta2**t)
+                    
+                    # Update weights and biases
+                    self.weights[i] -= learning_rate * m_weights_corr / (np.sqrt(v_weights_corr) + epsilon)
+                    self.biases[i] -= learning_rate * m_biases_corr / (np.sqrt(v_biases_corr) + epsilon)
+
+                # Fix the clipping issue by iterating through each array in the lists
+                for i in range(len(self.weights)):
+                    self.weights[i] = np.clip(self.weights[i], -1, 1)
+                    self.biases[i] = np.clip(self.biases[i], -1, 1)
+            else:
+                # Standard gradient descent
+                for i in range(len(self.weights)):
+                    self.weights[i] -= learning_rate * self.a[i].T @ self.dz[-(i+1)]
+                    self.biases[i] -= learning_rate * np.sum(self.dz[-(i+1)], axis=0)
+                for i in range(len(self.weights)):
+                    self.weights[i] = np.clip(self.weights[i], -1, 1)
+                    self.biases[i] = np.clip(self.biases[i], -1, 1)
+            if epoch % math.ceil(epochs/100) == 0:
+                
+                self.forward(x)
+                error=self.compute_loss(y)
+                print(f"Epoch {epoch}/{epochs}. Error change: {prevError-error:.6f}. New error is {error:.6f}")
+                prevError=error
+                
+                #if ping_webhook_URL != None:
+
+                '''original_noise=np.random.uniform(0,255,self.layers[0])
+                    
+                    noise=original_noise.copy()
+                    noise3=original_noise.copy()
+                    noise3=noise3.reshape(50,50,3)
+                    noise3=noise3.get()
+                    original_noise=original_noise.get()
+                    img = Image.fromarray(noise3.astype('uint8'), "RGB")  # Ensure the data type is uint8 for image
+                    img.save("Trained_Images/starting_noise.png")
+                    print(self.weights)
+                    print(self.dz)
+                    
+                    for _ in range(500):
+                        outputs=self.forward(noise/255)
+                        
+                        noise+=outputs
+                        noise=np.clip(noise,0,255)
+                        noise2=noise.reshape(50,50,3)
+
+                        noise2_numpy = noise2.get()
+                    img = Image.fromarray(noise2_numpy.astype('uint8'), "RGB")  # Ensure the data type is uint8 for image
+
+                    img.save(f"Trained_Images/Epoch_{epoch}.png")'''
+
+                    #webhook = DiscordWebhook(url=ping_webhook_URL, content=f'Done Milestone! {(epoch/epochs)*100}% done')
+                '''with open(f"Trained_Images/Epoch_{epoch}.png", 'rb') as f:
+                        webhook.add_file(file=f.read(), filename=f'Milestone_{epoch}_out_of_{epochs}.png')
+                    with open(f"Trained_Images/starting_noise.png", 'rb') as f:
+                        webhook.add_file(file=f.read(), filename=f'Starting Noise.png')'''
+                    #response = webhook.execute()
+                    
+            if epochs>0:
+                if epoch % math.ceil(epochs/5) == 0:
+                    print(f"Epoch {epoch}/{epochs}")
+                    self.save_to_file("Thing.npy")
+            
+            
+            endingTime=time.time()
+            totalTime+=endingTime-startingTime
+            timeTaken=(totalTime/(epoch+1))*epochs
+            print(f"Done epoch {epoch}/{epochs}. It will be done in {timeTaken-totalTime:.1f} seconds, or {(timeTaken-totalTime)/60:.1f} minutes, or {((timeTaken-totalTime)/60)/60:.2f} hours.")
+            
+            
+
+
+
+
+
+
+#These below functions are depreciated.
 def multiply_arrays_1d(array_of_arrays, numbers_array):
     if len(array_of_arrays) != len(numbers_array):
         return "Lengths of the arrays must be the same!"
@@ -12,6 +242,7 @@ def multiply_arrays_1d(array_of_arrays, numbers_array):
     return result.flatten()
 class neural_network:
     def __init__(self,inputs,middle_neurons,outputs):
+        print("This function is depretiated. Please use the Optomised_neural_network function. Support is coming soon for the DQL function again.")
         self.inputs=inputs 
         self.middle=middle_neurons 
         self.outputs=outputs
