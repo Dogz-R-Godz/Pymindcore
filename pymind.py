@@ -4,24 +4,33 @@ import math as maths
 import math
 import time
 import numpy as np2
-from PIL import Image
+from time import perf_counter
 #from discord_webhook import DiscordWebhook
 
 class Optomised_neural_network:
-    def __init__(self, input_neurons, hidden_layers, output_neurons, activation="relu",random_init=True,tanh_output=False):
+    def __init__(self, input_neurons, hidden_layers, output_neurons, activation="relu",random_init=True,tanh_output=False,clip_amount=1,float_type=np.float64):
+        ###random_init can be "Mean", True, or False
         self.layers = [input_neurons] + hidden_layers + [output_neurons]
         self.weights = []
         self.biases = []
         self.tanh_output=tanh_output
+        self.clip_amount=clip_amount
+        self.float_type=float_type
         
-        if random_init:
+        if random_init == "Mean":
             for i in range(len(self.layers) - 1):
-                self.weights.append(np.random.randn(self.layers[i], self.layers[i + 1]))
-                self.biases.append(np.random.randn(self.layers[i + 1]))
+                self.weights.append(np.random.randn(self.layers[i], self.layers[i + 1]).astype(float_type))
+                self.biases.append(np.random.randn(self.layers[i + 1]).astype(float_type))
+            
+        elif random_init:
+            for i in range(len(self.layers) - 1):
+                self.weights.append(np.random.uniform(-1,1,(self.layers[i], self.layers[i + 1])).astype(float_type))
+                self.biases.append(np.random.uniform(-1,1,self.layers[i + 1]).astype(float_type))
         else:
             for i in range(len(self.layers) - 1):
-                self.weights.append(np.zeros((self.layers[i], self.layers[i + 1])))
-                self.biases.append(np.zeros(self.layers[i + 1]))
+                self.weights.append(np.zeros((self.layers[i], self.layers[i + 1])).astype(float_type))
+                self.biases.append(np.zeros(self.layers[i + 1]).astype(float_type))
+        
         
         # Set activation function
         if activation == "relu":
@@ -51,37 +60,56 @@ class Optomised_neural_network:
     def tanh_prime(self, x):
         return 1 - np.tanh(x)**2
 
-    def save_to_file(self, filename,isCupy=False):
-        # Convert each CuPy array in the lists to a NumPy array
-        if isCupy:
-            weights_numpy = [weight.get() for weight in self.weights]
-            biases_numpy = [bias.get() for bias in self.biases]
-        else:
-            weights_numpy = self.weights
-            biases_numpy = self.biases
+    def save_to_file(self, filename):
+        # Check if self.weights and self.biases are already numpy arrays or lists of arrays
 
-        # Now create the NumPy array to bundle the data
-        data = np2.array([weights_numpy, biases_numpy], dtype=object)
+        # Ensure weights and biases are lists of arrays
+        weights_list = [self.weights] if isinstance(self.weights, np.ndarray) else [np.array(w) for w in self.weights]
+        biases_list = [self.biases] if isinstance(self.biases, np.ndarray) else [np.array(b) for b in self.biases]
 
-        # Save the data using NumPy's save method
-        np2.save(filename, data)
+
+        # Convert the lists to an object array
+        try:
+            weights_numpy = np.array(weights_list, dtype=object)
+            biases_numpy = np.array(biases_list, dtype=object)
+        except Exception as e:
+            print("Error in creating object arrays:", e)
+            raise
+
+        # Print shapes and contents of the object arrays
+
+        # Bundle the data
+        try:
+            # Directly create an array of objects, each being a list containing one array
+            data = np.array([weights_numpy.tolist(), biases_numpy.tolist()], dtype=object)
+        except Exception as e:
+            print("Error in bundling data without broadcasting:", e)
+            raise
+
+        # Print final data array shape and contents
+
+        # Save the data
+        np.save(filename, data)
+        print("Saved the data")
     
     def load_from_file(self, filename):
         # Load the data using NumPy's load method
-        data = np2.load(filename, allow_pickle=True)
+        data = np.load(filename, allow_pickle=True)
 
         # Convert the loaded NumPy arrays back to CuPy arrays and set to self.weights and self.biases
         self.weights = [np.array(arr) for arr in data[0]]
         self.biases = [np.array(arr) for arr in data[1]]
     
-    def forward(self, x, tanh_output=False):
-        self.a = [x]
+    def forward(self, x, tanh_output=False, verbose=False):
+        #self.a = [x]
         for i in range(len(self.weights) - 1):
             #curr_weights=self.weights[i].copy()
             #curr_weights=np.stack(curr_weights,self.a[-1].size)
 
             z = self.a[-1] @ self.weights[i] + self.biases[i]
+            if verbose:print("Calculated the stuff")
             self.a.append(self.activation(z))
+            if verbose:print(f"Done layer {i} out of {len(self.weights) - 1}")
         z_out = self.a[-1] @ self.weights[-1] + self.biases[-1]
         if tanh_output:self.a.append(self.tanh(z_out))
         else:self.a.append(self.sigmoid(z_out))
@@ -93,24 +121,33 @@ class Optomised_neural_network:
         eachStateError=(self.a[-1] - y) ** 2
         return np.sum(eachStateError)/m #(1 / (2 * m)) * 
 
-    def find_error(self, x, y):
+    def find_error(self, x, y, verbose=False):
         # Compute predictions for the given input states
-        predictions = self.forward(x,self.tanh_output)
+        self.a=[x]
+        predictions = self.forward(None,self.tanh_output,verbose) #x
+        if verbose:
+            print("Done forward pass")
         # Compute the error for each sample and sum them up
         differences=(predictions - y)
+        if verbose:print("Found differences")
         squared=np.sum(differences ** 2)
+        if verbose:print("Squared all the differences")
         total_error = squared/len(x)
+        if verbose:print("Found total error")
         return total_error
     
     def backward(self, x, y, learning_rate=0.1, reduceDeriv=False):
-        startingTime=time.time()
-        m = x.shape[0]
+        m = self.a[0].shape[0]
         self.dz = [-(y - self.a[-1]) / m]
         for i in reversed(range(len(self.weights))):
+
             dw = self.a[i].T @ self.dz[-1]
+            #print("Matrixed the shit out of these weights")
             db = np.sum(self.dz[-1], axis=0)
+            #print("About to do funny things to the weights")
             self.weights[i] -= learning_rate * dw
             self.biases[i] -= learning_rate * db
+            #print("About to do funny things to the derivs")
             if i != 0:
                 if reduceDeriv:
                     act=self.activation_prime(self.a[i])
@@ -119,6 +156,7 @@ class Optomised_neural_network:
                 else:
                     dz_next = self.dz[-1] @ self.weights[i].T * self.activation_prime(self.a[i])
                     self.dz.append(dz_next)
+            #print(f"Derived layer {i}/{len(self.weights)}")
                 
     def train(self, x, y, epochs=10000, learning_rate=0.01, optimizer=None, beta1=0.9, beta2=0.999, epsilon=1e-8, print_=False): #ping_webhook_URL=None,
         if optimizer == "ADAM":
@@ -132,8 +170,16 @@ class Optomised_neural_network:
         prevError=99999999
         for epoch in range(epochs):
             startingTime=time.time()
-            self.forward(x,self.tanh_output)
-            self.backward(x, y, learning_rate,True)
+            self.a=[x]
+            #print("Starting forward")
+            #start = perf_counter()
+            self.forward(None,self.tanh_output)
+            #end = perf_counter()
+            #print(f"Computed forward in {end-start} seconds")
+            #start = perf_counter()
+            self.backward(None, y, learning_rate)
+            #end = perf_counter()
+            #print(f"Computed backward in {end-start} seconds")
             
             if optimizer == "ADAM":
                 t += 1
@@ -162,22 +208,24 @@ class Optomised_neural_network:
 
                 # Fix the clipping issue by iterating through each array in the lists
                 for i in range(len(self.weights)):
-                    self.weights[i] = np.clip(self.weights[i], -1, 1)
-                    self.biases[i] = np.clip(self.biases[i], -1, 1)
+                    self.weights[i] = np.clip(self.weights[i], -self.clip_amount, self.clip_amount)
+                    self.biases[i] = np.clip(self.biases[i], -self.clip_amount, self.clip_amount)
             else:
+                #print("Gradient decenting")
                 # Standard gradient descent
                 for i in range(len(self.weights)):
                     self.weights[i] -= learning_rate * self.a[i].T @ self.dz[-(i+1)]
                     self.biases[i] -= learning_rate * np.sum(self.dz[-(i+1)], axis=0)
                 for i in range(len(self.weights)):
-                    self.weights[i] = np.clip(self.weights[i], -1, 1)
-                    self.biases[i] = np.clip(self.biases[i], -1, 1)
+                    self.weights[i] = np.clip(self.weights[i], -self.clip_amount, self.clip_amount)
+                    self.biases[i] = np.clip(self.biases[i], -self.clip_amount, self.clip_amount)
+            
             if epoch % math.ceil(epochs/100) == 0:
-                
-                self.forward(x)
-                error=self.compute_loss(y)
-                print(f"Epoch {epoch}/{epochs}. Error change: {prevError-error:.6f}. New error is {error:.6f}")
-                prevError=error
+                #self.a=[x]
+                #self.forward(None,verbose=True)
+                #error=self.compute_loss(y)
+                #print(f"Epoch {epoch}/{epochs}. Error change: {prevError-error:.6f}. New error is {error:.6f}")
+                #prevError=error
                 
                 #if ping_webhook_URL != None:
 
@@ -212,16 +260,15 @@ class Optomised_neural_network:
                         webhook.add_file(file=f.read(), filename=f'Starting Noise.png')'''
                     #response = webhook.execute()
                     
-            if epochs>0:
-                if epoch % math.ceil(epochs/5) == 0:
-                    print(f"Epoch {epoch}/{epochs}")
-                    self.save_to_file("Thing.npy")
+            #if epochs>0:
+                #if epoch % math.ceil(epochs/5) == 0:
+                    #self.save_to_file("Thing.npy")
             
             
             endingTime=time.time()
             totalTime+=endingTime-startingTime
             timeTaken=(totalTime/(epoch+1))*epochs
-            print(f"Done epoch {epoch}/{epochs}. It will be done in {timeTaken-totalTime:.1f} seconds, or {(timeTaken-totalTime)/60:.1f} minutes, or {((timeTaken-totalTime)/60)/60:.2f} hours.")
+            #print(f"Done epoch {epoch}/{epochs}. It will be done in {timeTaken-totalTime:.1f} seconds, or {(timeTaken-totalTime)/60:.1f} minutes, or {((timeTaken-totalTime)/60)/60:.2f} hours.")
             
             
 
