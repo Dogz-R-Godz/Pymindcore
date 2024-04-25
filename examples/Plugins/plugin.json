@@ -1,0 +1,12 @@
+{
+    "version": 1.0,
+    "pmcversion": 2.0,
+    "creator": "Me",
+    "name": "Better Find_Error",
+    "description": ["A test file", "Go away, this is a test. nothing to see here"],
+    "fname": "plugin_file",
+    "functions": ["find_error2f", "compute_loss2f", "pluginInit"],
+    "initfunc": "pluginInit",
+    "imports": {},
+    "cvars": {}
+}
