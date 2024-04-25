@@ -1,3 +1,5 @@
+#Old code. May not be supported anymore
+
 import pyautogui
 import keyboard
 import time
