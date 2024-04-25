@@ -1,3 +1,5 @@
+#Old code. May not be supported anymore
+
 import pygame as pg
 import numpy as np
 import pymind2 as pm
