@@ -1,3 +1,5 @@
+#Old code. May not be supported anymore
+
 import win32gui
 import win32ui
 import win32con
